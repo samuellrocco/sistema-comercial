@@ -1,6 +1,3 @@
 {
-  "produtos": [ ],
-  "clientes": [ ],
-  "pedidos": [ ]
-  
+  "sessoes": {}
 }
