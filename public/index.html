@@ -1,0 +1,602 @@
+<!DOCTYPE html>
+
+<html lang="pt-BR">
+
+<head>
+
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>Painel de Vendas</title>
+
+    <link
+        rel="stylesheet"
+        href="style.css"
+    >
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+</head>
+
+
+<body>
+
+
+    <!-- SIDEBAR -->
+
+    <aside class="sidebar">
+
+        <div class="logo">
+
+            <span>Sales</span>Flow
+
+        </div>
+
+
+        <nav>
+
+            <button
+                class="menu-item active"
+                data-page="dashboard"
+            >
+                📊 Dashboard
+            </button>
+
+
+            <button
+                class="menu-item"
+                data-page="produtos"
+            >
+                📦 Produtos
+            </button>
+
+
+            <button
+                class="menu-item"
+                data-page="clientes"
+            >
+                👥 Clientes
+            </button>
+
+
+            <button
+                class="menu-item"
+                data-page="pedidos"
+            >
+                🛒 Pedidos
+            </button>
+
+        </nav>
+
+
+        <div class="sidebar-footer">
+
+            Sistema Comercial
+
+            <small>v1.0</small>
+
+        </div>
+
+    </aside>
+
+
+
+    <!-- CONTEÚDO -->
+
+    <main class="main">
+
+
+        <!-- HEADER -->
+
+        <header class="header">
+
+            <div>
+
+                <p class="eyebrow">
+                    GESTÃO COMERCIAL
+                </p>
+
+                <h1 id="page-title">
+                    Dashboard
+                </h1>
+
+            </div>
+
+
+            <div class="api-status">
+
+                <span></span>
+
+                API Online
+
+            </div>
+
+        </header>
+
+
+
+        <!-- ================= DASHBOARD ================= -->
+
+        <section
+            id="dashboard"
+            class="page active"
+        >
+
+
+            <!-- CARDS -->
+
+            <div class="cards">
+
+
+                <div class="card">
+
+                    <div class="card-icon">
+                        💰
+                    </div>
+
+                    <div>
+
+                        <p>
+                            Faturamento
+                        </p>
+
+                        <h2 id="faturamento">
+                            R$ 0,00
+                        </h2>
+
+                    </div>
+
+                </div>
+
+
+
+                <div class="card">
+
+                    <div class="card-icon">
+                        🛒
+                    </div>
+
+                    <div>
+
+                        <p>
+                            Pedidos
+                        </p>
+
+                        <h2 id="total-pedidos">
+                            0
+                        </h2>
+
+                    </div>
+
+                </div>
+
+
+
+                <div class="card">
+
+                    <div class="card-icon">
+                        👥
+                    </div>
+
+                    <div>
+
+                        <p>
+                            Clientes
+                        </p>
+
+                        <h2 id="total-clientes">
+                            0
+                        </h2>
+
+                    </div>
+
+                </div>
+
+
+
+                <div class="card">
+
+                    <div class="card-icon">
+                        📦
+                    </div>
+
+                    <div>
+
+                        <p>
+                            Produtos
+                        </p>
+
+                        <h2 id="total-produtos">
+                            0
+                        </h2>
+
+                    </div>
+
+                </div>
+
+            </div>
+
+
+
+            <!-- GRÁFICOS -->
+
+            <div class="dashboard-grid">
+
+
+                <div class="panel">
+
+                    <div class="panel-header">
+
+                        <div>
+
+                            <h3>
+                                Faturamento
+                            </h3>
+
+                            <p>
+                                Evolução das vendas
+                            </p>
+
+                        </div>
+
+                    </div>
+
+
+                    <div class="chart-container">
+
+                        <canvas
+                            id="salesChart"
+                        ></canvas>
+
+                    </div>
+
+                </div>
+
+
+
+                <div class="panel">
+
+                    <div class="panel-header">
+
+                        <div>
+
+                            <h3>
+                                Resumo dos pedidos
+                            </h3>
+
+                            <p>
+                                Status atual
+                            </p>
+
+                        </div>
+
+                    </div>
+
+
+                    <div id="status-list"></div>
+
+                </div>
+
+            </div>
+
+        </section>
+
+
+
+        <!-- ================= PRODUTOS ================= -->
+
+        <section
+            id="produtos"
+            class="page"
+        >
+
+
+            <div class="page-actions">
+
+                <div>
+
+                    <h2>
+                        Produtos
+                    </h2>
+
+                    <p>
+                        Gerencie o catálogo de produtos.
+                    </p>
+
+                </div>
+
+
+                <button
+                    class="btn-primary"
+                    onclick="abrirProduto()"
+                >
+                    + Novo produto
+                </button>
+
+            </div>
+
+
+            <div class="toolbar">
+
+                <input
+                    type="text"
+                    id="busca-produto"
+                    placeholder="🔎 Buscar produto..."
+                >
+
+                <button
+                    onclick="carregarProdutos()"
+                >
+                    Buscar
+                </button>
+
+            </div>
+
+
+            <div class="panel">
+
+                <div class="table-container">
+
+                    <table>
+
+                        <thead>
+
+                            <tr>
+
+                                <th>Produto</th>
+
+                                <th>Categoria</th>
+
+                                <th>Preço</th>
+
+                                <th>Estoque</th>
+
+                                <th>Ações</th>
+
+                            </tr>
+
+                        </thead>
+
+
+                        <tbody
+                            id="produtos-table"
+                        ></tbody>
+
+                    </table>
+
+                </div>
+
+            </div>
+
+        </section>
+
+
+
+        <!-- ================= CLIENTES ================= -->
+
+        <section
+            id="clientes"
+            class="page"
+        >
+
+
+            <div class="page-actions">
+
+                <div>
+
+                    <h2>
+                        Clientes
+                    </h2>
+
+                    <p>
+                        Gerencie seus clientes.
+                    </p>
+
+                </div>
+
+
+                <button
+                    class="btn-primary"
+                    onclick="abrirCliente()"
+                >
+                    + Novo cliente
+                </button>
+
+            </div>
+
+
+            <div class="toolbar">
+
+                <input
+                    type="text"
+                    id="busca-cliente"
+                    placeholder="🔎 Buscar cliente..."
+                >
+
+                <button
+                    onclick="carregarClientes()"
+                >
+                    Buscar
+                </button>
+
+            </div>
+
+
+            <div class="panel">
+
+                <div class="table-container">
+
+                    <table>
+
+                        <thead>
+
+                            <tr>
+
+                                <th>Nome</th>
+
+                                <th>Email</th>
+
+                                <th>Telefone</th>
+
+                            </tr>
+
+                        </thead>
+
+
+                        <tbody
+                            id="clientes-table"
+                        ></tbody>
+
+                    </table>
+
+                </div>
+
+            </div>
+
+        </section>
+
+
+
+        <!-- ================= PEDIDOS ================= -->
+
+        <section
+            id="pedidos"
+            class="page"
+        >
+
+
+            <div class="page-actions">
+
+                <div>
+
+                    <h2>
+                        Pedidos
+                    </h2>
+
+                    <p>
+                        Acompanhe as vendas realizadas.
+                    </p>
+
+                </div>
+
+            </div>
+
+
+            <div class="toolbar">
+
+                <input
+                    type="text"
+                    id="busca-pedido"
+                    placeholder="🔎 Buscar cliente..."
+                >
+
+
+                <select id="filtro-status">
+
+                    <option value="">
+                        Todos os status
+                    </option>
+
+                    <option value="Pendente">
+                        Pendente
+                    </option>
+
+                    <option value="Pago">
+                        Pago
+                    </option>
+
+                    <option value="Concluído">
+                        Concluído
+                    </option>
+
+                    <option value="Cancelado">
+                        Cancelado
+                    </option>
+
+                </select>
+
+
+                <button
+                    onclick="carregarPedidos()"
+                >
+                    Filtrar
+                </button>
+
+            </div>
+
+
+            <div class="panel">
+
+                <div class="table-container">
+
+                    <table>
+
+                        <thead>
+
+                            <tr>
+
+                                <th>#</th>
+
+                                <th>Cliente</th>
+
+                                <th>Data</th>
+
+                                <th>Total</th>
+
+                                <th>Status</th>
+
+                            </tr>
+
+                        </thead>
+
+
+                        <tbody
+                            id="pedidos-table"
+                        ></tbody>
+
+                    </table>
+
+                </div>
+
+            </div>
+
+        </section>
+
+
+    </main>
+
+
+
+    <!-- MODAL -->
+
+    <div
+        id="modal"
+        class="modal hidden"
+    >
+
+        <div class="modal-box">
+
+            <button
+                class="close"
+                onclick="fecharModal()"
+            >
+                ×
+            </button>
+
+            <div id="modal-content"></div>
+
+        </div>
+
+    </div>
+
+
+
+    <script src="app.js"></script>
+
+</body>
+
+</html>
