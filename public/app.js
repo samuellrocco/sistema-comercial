@@ -1,983 +1,256 @@
-let salesChart;
+// app.js — frontend do Painel Comercial (Atlas)
 
+let produtos = [], clientes = [], pedidos = [];
+let itensForm = []; // itens do pedido em construção
+let chartFat = null, chartTop = null;
 
-// =================================
-// FUNÇÃO PRINCIPAL DA API
-// =================================
+const $ = s => document.querySelector(s);
+const brl = n => "R$ " + (+n || 0).toLocaleString("pt-BR", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+const esc = s => String(s || "").replace(/[&<>"]/g, m => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[m]));
 
-async function api(url, options = {}) {
-
-    const response = await fetch(url, {
-
-        headers: {
-            "Content-Type": "application/json"
-        },
-
-        ...options
-
-    });
-
-
-    const data = await response.json();
-
-
-    if (!response.ok) {
-
-        throw new Error(
-            data.erro || "Erro na API."
-        );
-
-    }
-
-
-    return data;
-
+async function api(path, options = {}) {
+  const res = await fetch("/api/" + path, { headers: { "Content-Type": "application/json" }, ...options });
+  if (!res.ok && res.status !== 204) {
+    const erro = await res.json().catch(() => ({}));
+    throw new Error(erro.erro || "Erro na requisição.");
+  }
+  return res.status === 204 ? null : res.json();
 }
 
+// ---------- navegação ----------
+document.querySelectorAll(".side nav button").forEach(b => b.onclick = () => {
+  document.querySelectorAll(".side nav button").forEach(x => x.classList.toggle("on", x === b));
+  ["dash", "prod", "cli", "ped", "fat"].forEach(id => $("#" + id).hidden = id !== b.dataset.t);
+  if (b.dataset.t === "dash") carregarDashboard();
+});
 
-
-// =================================
-// FORMATAÇÃO DE DINHEIRO
-// =================================
-
-function dinheiro(valor) {
-
-    return Number(valor).toLocaleString(
-        "pt-BR",
-        {
-            style: "currency",
-            currency: "BRL"
-        }
-    );
-
+// ============ PRODUTOS ============
+$("#fp").onsubmit = async e => {
+  e.preventDefault(); const f = e.target;
+  const payload = { nome: f.nome.value.trim(), categoria: f.categoria.value.trim(), preco: Number(f.preco.value) || 0, estoque: Number(f.estoque.value) || 0 };
+  if (!payload.nome) return;
+  try { produtos.push(await api("produtos", { method: "POST", body: JSON.stringify(payload) })); f.reset(); renderProdutos(); renderSelects(); }
+  catch (e) { alert(e.message); }
+};
+async function delProduto(id) {
+  produtos = produtos.filter(p => p.id !== id); renderProdutos(); renderSelects();
+  try { await api("produtos/" + id, { method: "DELETE" }); } catch (e) { alert(e.message); }
+}
+function renderProdutos() {
+  $("#ep").hidden = produtos.length > 0;
+  $("#tp").innerHTML = produtos.map(p => `<tr><td><strong>${esc(p.nome)}</strong></td><td>${esc(p.categoria) || "—"}</td>
+    <td class="num">${brl(p.preco)}</td><td class="num">${p.estoque}</td>
+    <td><button class="x" data-del-p="${p.id}">Excluir</button></td></tr>`).join("");
 }
 
+// ============ CLIENTES ============
+$("#fc").onsubmit = async e => {
+  e.preventDefault(); const f = e.target;
+  const payload = { nome: f.nome.value.trim(), empresa: f.empresa.value.trim(), email: f.email.value.trim(), fone: f.fone.value.trim() };
+  if (!payload.nome) return;
+  try { clientes.push(await api("clientes", { method: "POST", body: JSON.stringify(payload) })); f.reset(); renderClientes(); renderSelects(); }
+  catch (e) { alert(e.message); }
+};
+async function delCliente(id) {
+  clientes = clientes.filter(c => c.id !== id); renderClientes(); renderSelects();
+  try { await api("clientes/" + id, { method: "DELETE" }); } catch (e) { alert(e.message); }
+}
+function renderClientes() {
+  $("#ec").hidden = clientes.length > 0;
+  $("#tc").innerHTML = clientes.map(c => {
+    const q = pedidos.filter(p => p.clienteId === c.id).length;
+    const ct = [c.email, c.fone].filter(Boolean).join(" · ") || "—";
+    return `<tr><td><strong>${esc(c.nome)}</strong></td><td>${esc(c.empresa) || "—"}</td><td>${esc(ct)}</td>
+      <td class="num">${q}</td><td><button class="x" data-del-c="${c.id}">Excluir</button></td></tr>`;
+  }).join("");
+}
 
+// ============ SELECTS COMPARTILHADOS ============
+function renderSelects() {
+  $("#selCliente").innerHTML = clientes.map(c => `<option value="${c.id}">${esc(c.nome)}</option>`).join("") || '<option value="">Cadastre um cliente primeiro</option>';
+  $("#fCliente").innerHTML = '<option value="">Todos</option>' + clientes.map(c => `<option value="${c.id}">${esc(c.nome)}</option>`).join("");
+}
 
-// =================================
-// NAVEGAÇÃO
-// =================================
+// ============ PEDIDOS: montagem de itens ============
+function linhaItem(idx) {
+  const opts = produtos.map(p => `<option value="${p.id}">${esc(p.nome)} — ${brl(p.preco)}</option>`).join("");
+  return `<div class="item-row" data-idx="${idx}">
+    <div><label>Produto</label><select class="it-prod">${opts || '<option value="">Cadastre um produto</option>'}</select></div>
+    <div><label>Qtd.</label><input class="it-qtd" type="number" min="1" value="1"></div>
+    <div><label class="sub">Subtotal</label><div class="num it-sub" style="padding:8px 0">R$ 0</div></div>
+    <button class="x" type="button" data-rm-item="${idx}">Remover</button>
+  </div>`;
+}
+function redesenharItens() {
+  $("#itensPedido").innerHTML = itensForm.map((_, i) => linhaItem(i)).join("");
+  document.querySelectorAll("#itensPedido .item-row").forEach(row => {
+    const idx = +row.dataset.idx;
+    const sel = row.querySelector(".it-prod"), qtd = row.querySelector(".it-qtd");
+    sel.value = itensForm[idx].produtoId || sel.value;
+    qtd.value = itensForm[idx].quantidade || 1;
+    const atualizar = () => {
+      itensForm[idx].produtoId = sel.value;
+      itensForm[idx].quantidade = Math.max(1, Number(qtd.value) || 1);
+      const p = produtos.find(x => x.id === sel.value);
+      const sub = p ? p.preco * itensForm[idx].quantidade : 0;
+      row.querySelector(".it-sub").textContent = brl(sub);
+      atualizarTotalPedido();
+    };
+    sel.onchange = atualizar; qtd.oninput = atualizar; atualizar();
+  });
+}
+function atualizarTotalPedido() {
+  const total = itensForm.reduce((sum, it) => {
+    const p = produtos.find(x => x.id === it.produtoId);
+    return sum + (p ? p.preco * it.quantidade : 0);
+  }, 0);
+  $("#totalPedido").textContent = brl(total);
+}
+$("#addItem").onclick = () => {
+  if (!produtos.length) { alert("Cadastre ao menos um produto antes de montar um pedido."); return; }
+  itensForm.push({ produtoId: produtos[0].id, quantidade: 1 });
+  redesenharItens(); atualizarTotalPedido();
+};
+document.addEventListener("click", e => {
+  const rm = e.target.dataset.rmItem;
+  if (rm !== undefined) { itensForm.splice(+rm, 1); redesenharItens(); atualizarTotalPedido(); }
+});
 
-document
-    .querySelectorAll(".menu-item")
-    .forEach(button => {
+$("#salvarPedido").onclick = async () => {
+  const f = $("#fped");
+  if (!f.clienteId.value) return alert("Selecione um cliente.");
+  if (!itensForm.length) return alert("Adicione ao menos um item ao pedido.");
+  const payload = {
+    clienteId: f.clienteId.value,
+    data: f.data.value || undefined,
+    status: f.status.value,
+    itens: itensForm.map(it => ({ produtoId: it.produtoId, quantidade: it.quantidade }))
+  };
+  try {
+    const criado = await api("pedidos", { method: "POST", body: JSON.stringify(payload) });
+    pedidos.unshift(criado);
+    itensForm = []; redesenharItens(); atualizarTotalPedido();
+    f.reset();
+    await carregarProdutos(); // estoque mudou
+    renderClientes(); renderPedidosFiltrados(); renderFaturamento();
+  } catch (e) { alert(e.message); }
+};
 
-        button.addEventListener(
-            "click",
-            () => {
+// ============ PEDIDOS: listagem e filtros ============
+$("#filtrar").onclick = () => renderPedidosFiltrados(true);
 
-                document
-                    .querySelectorAll(".menu-item")
-                    .forEach(item => {
+async function renderPedidosFiltrados(buscarDoServidor) {
+  let lista = pedidos;
+  if (buscarDoServidor) {
+    const qs = new URLSearchParams();
+    if ($("#fStatus").value) qs.set("status", $("#fStatus").value);
+    if ($("#fCliente").value) qs.set("clienteId", $("#fCliente").value);
+    if ($("#fDe").value) qs.set("de", $("#fDe").value);
+    if ($("#fAte").value) qs.set("ate", $("#fAte").value);
+    lista = await api("pedidos?" + qs.toString());
+  }
+  $("#eped").hidden = lista.length > 0;
+  $("#tped").innerHTML = lista.map(p => linhaPedido(p)).join("");
+}
+function linhaPedido(p) {
+  const c = clientes.find(x => x.id === p.clienteId);
+  const total = p.itens.reduce((s, it) => s + it.precoUnit * it.quantidade, 0);
+  const resumoItens = p.itens.map(it => `${it.quantidade}× ${esc(it.nome)}`).join(", ");
+  const cls = p.status === "Faturado" ? "faturado" : p.status === "Cancelado" ? "cancelado" : "";
+  return `<tr><td class="num">${p.data}</td><td>${c ? esc(c.nome) : "—"}</td><td>${resumoItens}</td>
+    <td class="num">${brl(total)}</td>
+    <td><select data-st="${p.id}" style="width:auto;display:inline-block;font-size:.78rem;padding:3px 6px">
+      ${["Pendente", "Faturado", "Cancelado"].map(s => `<option${s === p.status ? " selected" : ""}>${s}</option>`).join("")}
+    </select> <span class="status ${cls}" style="margin-left:6px">${p.status}</span></td>
+    <td><button class="x" data-del-ped="${p.id}">Excluir</button></td></tr>`;
+}
+document.addEventListener("change", async e => {
+  if (e.target.dataset.st) {
+    const id = e.target.dataset.st, status = e.target.value;
+    try {
+      const atualizado = await api("pedidos/" + id, { method: "PUT", body: JSON.stringify({ status }) });
+      pedidos = pedidos.map(p => p.id === id ? atualizado : p);
+      await carregarProdutos();
+      renderPedidosFiltrados(); renderFaturamento(); carregarDashboard();
+    } catch (e) { alert(e.message); }
+  }
+});
+async function delPedido(id) {
+  try {
+    await api("pedidos/" + id, { method: "DELETE" });
+    pedidos = pedidos.filter(p => p.id !== id);
+    await carregarProdutos();
+    renderClientes(); renderPedidosFiltrados(); renderFaturamento(); carregarDashboard();
+  } catch (e) { alert(e.message); }
+}
 
-                        item.classList.remove(
-                            "active"
-                        );
+document.addEventListener("click", e => {
+  const dp = e.target.dataset.delP, dc = e.target.dataset.delC, dped = e.target.dataset.delPed;
+  if (dp && confirm("Excluir este produto?")) delProduto(dp);
+  if (dc && confirm("Excluir este cliente?")) delCliente(dc);
+  if (dped && confirm("Excluir este pedido? O estoque será devolvido.")) delPedido(dped);
+});
 
-                    });
+// ============ FATURAMENTO ============
+function renderFaturamento() {
+  const faturados = pedidos.filter(p => p.status === "Faturado");
+  const totais = faturados.map(p => p.itens.reduce((s, it) => s + it.precoUnit * it.quantidade, 0));
+  const total = totais.reduce((a, b) => a + b, 0);
+  $("#f1").textContent = brl(total);
+  $("#f2").textContent = faturados.length;
+  $("#f3").textContent = brl(faturados.length ? total / faturados.length : 0);
+  $("#efat").hidden = faturados.length > 0;
+  $("#tfat").innerHTML = faturados.map(p => {
+    const c = clientes.find(x => x.id === p.clienteId);
+    const t = p.itens.reduce((s, it) => s + it.precoUnit * it.quantidade, 0);
+    const resumo = p.itens.map(it => `${it.quantidade}× ${esc(it.nome)}`).join(", ");
+    return `<tr><td class="num">${p.data}</td><td>${c ? esc(c.nome) : "—"}</td><td>${resumo}</td><td class="num">${brl(t)}</td></tr>`;
+  }).join("");
+}
 
-
-                document
-                    .querySelectorAll(".page")
-                    .forEach(page => {
-
-                        page.classList.remove(
-                            "active"
-                        );
-
-                    });
-
-
-                button.classList.add(
-                    "active"
-                );
-
-
-                const page =
-                    button.dataset.page;
-
-
-                document
-                    .getElementById(page)
-                    .classList.add("active");
-
-
-                const titles = {
-
-                    dashboard: "Dashboard",
-
-                    produtos: "Produtos",
-
-                    clientes: "Clientes",
-
-                    pedidos: "Pedidos"
-
-                };
-
-
-                document
-                    .getElementById(
-                        "page-title"
-                    )
-                    .textContent =
-                    titles[page];
-
-
-                if (page === "dashboard") {
-
-                    carregarDashboard();
-
-                }
-
-
-                if (page === "produtos") {
-
-                    carregarProdutos();
-
-                }
-
-
-                if (page === "clientes") {
-
-                    carregarClientes();
-
-                }
-
-
-                if (page === "pedidos") {
-
-                    carregarPedidos();
-
-                }
-
-            }
-
-        );
-
-    });
-
-
-
-// =================================
-// DASHBOARD
-// =================================
-
+// ============ DASHBOARD / GRÁFICOS ============
 async function carregarDashboard() {
+  let d;
+  try { d = await api("dashboard"); } catch (e) { return; }
+  $("#k1").textContent = brl(d.faturamentoTotal);
+  $("#k2").textContent = brl(d.ticketMedio);
+  $("#k3").textContent = d.pedidosPendentes;
+  $("#k4").textContent = d.totalProdutos;
 
-    try {
+  const corPine = getComputedStyle(document.documentElement).getPropertyValue("--pine-2").trim() || "#2c4f38";
+  const labelsMes = d.porMes.map(m => {
+    const [y, mo] = m.mes.split("-");
+    return ["Jan","Fev","Mar","Abr","Mai","Jun","Jul","Ago","Set","Out","Nov","Dez"][+mo - 1] + "/" + y.slice(2);
+  });
 
-        const dados =
-            await api(
-                "/api/dashboard"
-            );
+  if (chartFat) chartFat.destroy();
+  chartFat = new Chart($("#graf1"), {
+    type: "bar",
+    data: { labels: labelsMes, datasets: [{ label: "Faturamento", data: d.porMes.map(m => m.valor), backgroundColor: corPine }] },
+    options: { plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true } } }
+  });
 
-
-        document
-            .getElementById(
-                "faturamento"
-            )
-            .textContent =
-            dinheiro(
-                dados.faturamento
-            );
-
-
-        document
-            .getElementById(
-                "total-pedidos"
-            )
-            .textContent =
-            dados.pedidos;
-
-
-        document
-            .getElementById(
-                "total-clientes"
-            )
-            .textContent =
-            dados.clientes;
-
-
-        document
-            .getElementById(
-                "total-produtos"
-            )
-            .textContent =
-            dados.produtos;
-
-
-        carregarGrafico();
-
-        carregarStatus();
-
-    }
-
-    catch (error) {
-
-        console.error(error);
-
-    }
-
+  if (chartTop) chartTop.destroy();
+  chartTop = new Chart($("#graf2"), {
+    type: "bar",
+    data: { labels: d.topProdutos.map(p => p.nome), datasets: [{ label: "Unidades vendidas", data: d.topProdutos.map(p => p.quantidade), backgroundColor: corPine }] },
+    options: { indexAxis: "y", plugins: { legend: { display: false } }, scales: { x: { beginAtZero: true } } }
+  });
 }
 
+// ============ carga inicial ============
+async function carregarProdutos() { produtos = await api("produtos"); renderProdutos(); renderSelects(); redesenharItens(); }
 
-
-// =================================
-// GRÁFICO
-// =================================
-
-async function carregarGrafico() {
-
-    const dados =
-        await api(
-            "/api/relatorios/faturamento"
-        );
-
-
-    const labels =
-        dados.map(item => item.mes);
-
-
-    const valores =
-        dados.map(
-            item => item.faturamento
-        );
-
-
-    const canvas =
-        document.getElementById(
-            "salesChart"
-        );
-
-
-    if (salesChart) {
-
-        salesChart.destroy();
-
-    }
-
-
-    salesChart =
-        new Chart(
-            canvas,
-            {
-
-                type: "line",
-
-                data: {
-
-                    labels,
-
-                    datasets: [
-
-                        {
-
-                            label:
-                                "Faturamento",
-
-                            data:
-                                valores,
-
-                            borderWidth: 3,
-
-                            tension: .3,
-
-                            fill: true
-
-                        }
-
-                    ]
-
-                },
-
-                options: {
-
-                    responsive: true,
-
-                    maintainAspectRatio: false,
-
-                    plugins: {
-
-                        legend: {
-
-                            display: false
-
-                        },
-
-                        tooltip: {
-
-                            callbacks: {
-
-                                label:
-                                    context =>
-                                        dinheiro(
-                                            context.raw
-                                        )
-
-                            }
-
-                        }
-
-                    }
-
-                }
-
-            }
-
-        );
-
+async function carregarTudo() {
+  try {
+    [produtos, clientes, pedidos] = await Promise.all([api("produtos"), api("clientes"), api("pedidos")]);
+    $("#foot").textContent = "Sessão individual conectada.";
+  } catch (e) {
+    $("#foot").textContent = "Não foi possível conectar ao servidor.";
+    console.error(e);
+  }
+  renderProdutos(); renderClientes(); renderSelects();
+  renderPedidosFiltrados(); renderFaturamento();
+  carregarDashboard();
 }
-
-
-
-// =================================
-// STATUS DOS PEDIDOS
-// =================================
-
-async function carregarStatus() {
-
-    const pedidos =
-        await api(
-            "/api/pedidos"
-        );
-
-
-    const contagem = {};
-
-
-    pedidos.forEach(
-        pedido => {
-
-            if (!contagem[pedido.status]) {
-
-                contagem[pedido.status] = 0;
-
-            }
-
-            contagem[pedido.status]++;
-
-        }
-    );
-
-
-    const container =
-        document.getElementById(
-            "status-list"
-        );
-
-
-    container.innerHTML = "";
-
-
-    Object.entries(contagem)
-        .forEach(
-            ([status, quantidade]) => {
-
-                container.innerHTML += `
-
-                    <div class="status-item">
-
-                        <span>
-                            ${status}
-                        </span>
-
-                        <strong>
-                            ${quantidade}
-                        </strong>
-
-                    </div>
-
-                `;
-
-            }
-        );
-
-}
-
-
-
-// =================================
-// PRODUTOS
-// =================================
-
-async function carregarProdutos() {
-
-    const busca =
-        document
-            .getElementById(
-                "busca-produto"
-            )
-            .value;
-
-
-    const produtos =
-        await api(
-            `/api/produtos?busca=${encodeURIComponent(busca)}`
-        );
-
-
-    const tabela =
-        document.getElementById(
-            "produtos-table"
-        );
-
-
-    tabela.innerHTML = "";
-
-
-    produtos.forEach(
-        produto => {
-
-            tabela.innerHTML += `
-
-                <tr>
-
-                    <td>
-                        <strong>
-                            ${produto.nome}
-                        </strong>
-                    </td>
-
-                    <td>
-                        ${produto.categoria}
-                    </td>
-
-                    <td>
-                        ${dinheiro(produto.preco)}
-                    </td>
-
-                    <td>
-                        ${produto.estoque}
-                    </td>
-
-                    <td>
-
-                        <button
-                            onclick="
-                                excluirProduto(
-                                    ${produto.id}
-                                )
-                            "
-                        >
-                            Excluir
-                        </button>
-
-                    </td>
-
-                </tr>
-
-            `;
-
-        }
-    );
-
-}
-
-
-
-// =================================
-// EXCLUIR PRODUTO
-// =================================
-
-async function excluirProduto(id) {
-
-    const confirmar =
-        confirm(
-            "Deseja realmente excluir este produto?"
-        );
-
-
-    if (!confirmar) {
-
-        return;
-
-    }
-
-
-    try {
-
-        await api(
-            `/api/produtos/${id}`,
-            {
-                method: "DELETE"
-            }
-        );
-
-
-        carregarProdutos();
-
-        carregarDashboard();
-
-    }
-
-    catch (error) {
-
-        alert(
-            error.message
-        );
-
-    }
-
-}
-
-
-
-// =================================
-// MODAL PRODUTO
-// =================================
-
-function abrirProduto() {
-
-    document
-        .getElementById(
-            "modal-content"
-        )
-        .innerHTML = `
-
-            <h2>
-                Novo produto
-            </h2>
-
-
-            <form
-                class="form"
-                onsubmit="
-                    salvarProduto(event)
-                "
-            >
-
-                <input
-                    name="nome"
-                    placeholder="Nome do produto"
-                    required
-                >
-
-
-                <input
-                    name="categoria"
-                    placeholder="Categoria"
-                >
-
-
-                <input
-                    name="preco"
-                    type="number"
-                    step="0.01"
-                    placeholder="Preço"
-                    required
-                >
-
-
-                <input
-                    name="estoque"
-                    type="number"
-                    placeholder="Estoque"
-                    required
-                >
-
-
-                <button
-                    type="submit"
-                >
-                    Cadastrar produto
-                </button>
-
-            </form>
-
-        `;
-
-
-    document
-        .getElementById(
-            "modal"
-        )
-        .classList.remove(
-            "hidden"
-        );
-
-}
-
-
-
-// =================================
-// SALVAR PRODUTO
-// =================================
-
-async function salvarProduto(event) {
-
-    event.preventDefault();
-
-
-    const form =
-        new FormData(
-            event.target
-        );
-
-
-    try {
-
-        await api(
-            "/api/produtos",
-            {
-
-                method: "POST",
-
-                body: JSON.stringify({
-
-                    nome:
-                        form.get("nome"),
-
-                    categoria:
-                        form.get(
-                            "categoria"
-                        ),
-
-                    preco:
-                        form.get("preco"),
-
-                    estoque:
-                        form.get("estoque")
-
-                })
-
-            }
-        );
-
-
-        fecharModal();
-
-        carregarProdutos();
-
-        carregarDashboard();
-
-    }
-
-    catch (error) {
-
-        alert(
-            error.message
-        );
-
-    }
-
-}
-
-
-
-// =================================
-// CLIENTES
-// =================================
-
-async function carregarClientes() {
-
-    const busca =
-        document
-            .getElementById(
-                "busca-cliente"
-            )
-            .value;
-
-
-    const clientes =
-        await api(
-            `/api/clientes?busca=${encodeURIComponent(busca)}`
-        );
-
-
-    const tabela =
-        document.getElementById(
-            "clientes-table"
-        );
-
-
-    tabela.innerHTML = "";
-
-
-    clientes.forEach(
-        cliente => {
-
-            tabela.innerHTML += `
-
-                <tr>
-
-                    <td>
-                        <strong>
-                            ${cliente.nome}
-                        </strong>
-                    </td>
-
-                    <td>
-                        ${cliente.email}
-                    </td>
-
-                    <td>
-                        ${cliente.telefone || "-"}
-                    </td>
-
-                </tr>
-
-            `;
-
-        }
-    );
-
-}
-
-
-
-// =================================
-// NOVO CLIENTE
-// =================================
-
-function abrirCliente() {
-
-    document
-        .getElementById(
-            "modal-content"
-        )
-        .innerHTML = `
-
-            <h2>
-                Novo cliente
-            </h2>
-
-
-            <form
-                class="form"
-                onsubmit="
-                    salvarCliente(event)
-                "
-            >
-
-                <input
-                    name="nome"
-                    placeholder="Nome completo"
-                    required
-                >
-
-
-                <input
-                    name="email"
-                    type="email"
-                    placeholder="Email"
-                    required
-                >
-
-
-                <input
-                    name="telefone"
-                    placeholder="Telefone"
-                >
-
-
-                <button
-                    type="submit"
-                >
-                    Cadastrar cliente
-                </button>
-
-            </form>
-
-        `;
-
-
-    document
-        .getElementById(
-            "modal"
-        )
-        .classList.remove(
-            "hidden"
-        );
-
-}
-
-
-
-// =================================
-// SALVAR CLIENTE
-// =================================
-
-async function salvarCliente(event) {
-
-    event.preventDefault();
-
-
-    const form =
-        new FormData(
-            event.target
-        );
-
-
-    try {
-
-        await api(
-            "/api/clientes",
-            {
-
-                method: "POST",
-
-                body: JSON.stringify({
-
-                    nome:
-                        form.get("nome"),
-
-                    email:
-                        form.get("email"),
-
-                    telefone:
-                        form.get(
-                            "telefone"
-                        )
-
-                })
-
-            }
-        );
-
-
-        fecharModal();
-
-        carregarClientes();
-
-        carregarDashboard();
-
-    }
-
-    catch (error) {
-
-        alert(
-            error.message
-        );
-
-    }
-
-}
-
-
-
-// =================================
-// PEDIDOS
-// =================================
-
-async function carregarPedidos() {
-
-    const busca =
-        document
-            .getElementById(
-                "busca-pedido"
-            )
-            .value;
-
-
-    const status =
-        document
-            .getElementById(
-                "filtro-status"
-            )
-            .value;
-
-
-    const pedidos =
-        await api(
-
-            `/api/pedidos?busca=${encodeURIComponent(busca)}&status=${encodeURIComponent(status)}`
-
-        );
-
-
-    const tabela =
-        document.getElementById(
-            "pedidos-table"
-        );
-
-
-    tabela.innerHTML = "";
-
-
-    pedidos.forEach(
-        pedido => {
-
-            tabela.innerHTML += `
-
-                <tr>
-
-                    <td>
-                        #${pedido.id}
-                    </td>
-
-                    <td>
-                        ${pedido.cliente}
-                    </td>
-
-                    <td>
-                        ${formatarData(
-                            pedido.data
-                        )}
-                    </td>
-
-                    <td>
-                        ${dinheiro(
-                            pedido.total
-                        )}
-                    </td>
-
-                    <td>
-
-                        <span class="badge">
-
-                            ${pedido.status}
-
-                        </span>
-
-                    </td>
-
-                </tr>
-
-            `;
-
-        }
-    );
-
-}
-
-
-
-// =================================
-// DATA
-// =================================
-
-function formatarData(data) {
-
-    return new Date(
-        data + "T00:00:00"
-    ).toLocaleDateString(
-        "pt-BR"
-    );
-
-}
-
-
-
-// =================================
-// MODAL
-// =================================
-
-function fecharModal() {
-
-    document
-        .getElementById(
-            "modal"
-        )
-        .classList.add(
-            "hidden"
-        );
-
-}
-
-
-
-// =================================
-// INICIALIZAÇÃO
-// =================================
-
-carregarDashboard();
+carregarTudo();
